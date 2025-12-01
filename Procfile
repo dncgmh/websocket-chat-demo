@@ -1,1 +1,1 @@
-web: go run *.go
+web: bin/websocket-chat-demo
