@@ -8,6 +8,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"os"
 )
 
 var addr = flag.String("addr", ":8080", "http service address")
@@ -27,13 +28,25 @@ func serveHome(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	flag.Parse()
+	
+	// Use PORT environment variable if available (for Heroku)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = *addr
+		if port[0] == ':' {
+			port = port[1:]
+		}
+	}
+	
 	hub := newHub()
 	go hub.run()
 	http.HandleFunc("/", serveHome)
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(hub, w, r)
 	})
-	err := http.ListenAndServe(*addr, nil)
+	
+	log.Printf("Server starting on port %s", port)
+	err := http.ListenAndServe(":"+port, nil)
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
