@@ -28,7 +28,7 @@ func serveHome(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	flag.Parse()
-	
+
 	// Use PORT environment variable if available (for Heroku)
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -37,14 +37,14 @@ func main() {
 			port = port[1:]
 		}
 	}
-	
+
 	hub := newHub()
 	go hub.run()
 	http.HandleFunc("/", serveHome)
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(hub, w, r)
 	})
-	
+
 	log.Printf("Server starting on port %s", port)
 	err := http.ListenAndServe(":"+port, nil)
 	if err != nil {

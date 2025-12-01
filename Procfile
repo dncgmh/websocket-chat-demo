@@ -1,1 +1,1 @@
-web: websocket-demo
+web: go run *.go
