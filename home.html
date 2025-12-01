@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chat</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="text/javascript">
+window.onload = function () {
+    var conn;
+    var msg = document.getElementById("msg");
+    var log = document.getElementById("log");
+    var statusIndicator = document.getElementById("status");
+    var statusText = document.getElementById("statusText");
+    var guestName = "Guest";
+    var guestNameDisplay = document.getElementById("guestName");
+
+    function updateStatus(connected) {
+        if (connected) {
+            statusIndicator.className = "w-2 h-2 bg-green-500 rounded-full";
+            statusText.textContent = "Connected";
+        } else {
+            statusIndicator.className = "w-2 h-2 bg-red-500 rounded-full";
+            statusText.textContent = "Disconnected";
+        }
+    }
+
+    function appendLog(item) {
+        var doScroll = log.scrollTop > log.scrollHeight - log.clientHeight - 1;
+        log.appendChild(item);
+        if (doScroll) {
+            log.scrollTop = log.scrollHeight - log.clientHeight;
+        }
+    }
+
+    document.getElementById("form").onsubmit = function () {
+        if (!conn) {
+            return false;
+        }
+        if (!msg.value) {
+            return false;
+        }
+        
+        var item = document.createElement("div");
+        item.className = "flex justify-end mb-2";
+        item.innerHTML = '<div class="bg-blue-500 text-white rounded-lg px-3 py-1.5 max-w-xs lg:max-w-md break-words text-sm">' + 
+                        '<div class="font-semibold text-xs mb-0.5">You</div>' +
+                        escapeHtml(msg.value) + '</div>';
+        appendLog(item);
+        
+        conn.send(msg.value);
+        msg.value = "";
+        return false;
+    };
+
+    function escapeHtml(text) {
+        var map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+    }
+
+    if (window["WebSocket"]) {
+        conn = new WebSocket("ws://" + document.location.host + "/ws");
+        
+        conn.onopen = function (evt) {
+            updateStatus(true);
+            var item = document.createElement("div");
+            item.className = "text-center text-xs text-gray-500 my-1";
+            item.innerHTML = "<span class='bg-gray-100 px-2 py-0.5 rounded-full'>Connection established</span>";
+            appendLog(item);
+        };
+        
+        conn.onclose = function (evt) {
+            updateStatus(false);
+            var item = document.createElement("div");
+            item.className = "text-center text-xs text-gray-500 my-1";
+            item.innerHTML = "<span class='bg-red-100 text-red-700 px-2 py-0.5 rounded-full'>Connection closed</span>";
+            appendLog(item);
+        };
+        
+        conn.onmessage = function (evt) {
+            var messages = evt.data.split('\n');
+            for (var i = 0; i < messages.length; i++) {
+                if (messages[i]) {
+                    // Check if this is an identity message
+                    if (messages[i].startsWith('IDENTITY:')) {
+                        guestName = messages[i].substring(9);
+                        guestNameDisplay.textContent = guestName;
+                        continue;
+                    }
+                    
+                    // Parse message to extract sender name
+                    var colonIndex = messages[i].indexOf(':');
+                    var senderName = '';
+                    var messageText = messages[i];
+                    
+                    if (colonIndex > 0) {
+                        senderName = messages[i].substring(0, colonIndex);
+                        messageText = messages[i].substring(colonIndex + 1).trim();
+                    }
+                    
+                    var item = document.createElement("div");
+                    item.className = "flex justify-start mb-2";
+                    item.innerHTML = '<div class="bg-gray-200 text-gray-800 rounded-lg px-3 py-1.5 max-w-xs lg:max-w-md break-words text-sm">' + 
+                                    '<div class="font-semibold text-xs mb-0.5 text-gray-600">' + escapeHtml(senderName) + '</div>' +
+                                    escapeHtml(messageText) + '</div>';
+                    appendLog(item);
+                }
+            }
+        };
+    } else {
+        var item = document.createElement("div");
+        item.className = "text-center text-red-600 font-semibold my-4";
+        item.innerHTML = "Your browser does not support WebSockets.";
+        appendLog(item);
+    }
+};
+</script>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 h-screen flex items-center justify-center p-2">
+    <div class="w-full max-w-3xl h-full max-h-[600px] bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden">
+        <!-- Header -->
+        <div class="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-2 flex items-center justify-between">
+            <div>
+                <h1 class="text-lg font-bold">WebSocket Chat</h1>
+                <p class="text-blue-100 text-xs flex items-center gap-2">
+                    <span id="guestName">Guest</span>
+                </p>
+            </div>
+            <div class="flex items-center gap-2">
+                <div id="status" class="w-2 h-2 bg-red-500 rounded-full"></div>
+                <span id="statusText" class="text-xs">Disconnected</span>
+            </div>
+        </div>
+
+        <!-- Messages Container -->
+        <div id="log" class="flex-1 overflow-y-auto p-3 space-y-1">
+            <!-- Messages will appear here -->
+        </div>
+
+        <!-- Input Form -->
+        <form id="form" class="border-t border-gray-200 p-3 bg-gray-50">
+            <div class="flex gap-2">
+                <input 
+                    type="text" 
+                    id="msg" 
+                    placeholder="Type your message..." 
+                    autofocus
+                    class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <button 
+                    type="submit"
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                >
+                    Send
+                </button>
+            </div>
+        </form>
+    </div>
+</body>
+</html>
