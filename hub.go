@@ -48,7 +48,7 @@ func (h *Hub) run() {
 		case message := <-h.broadcast:
 			for client := range h.clients {
 				// Skip sending message back to the sender
-				if client == message.sender {
+				if client.name == message.sender.name {
 					continue
 				}
 				select {

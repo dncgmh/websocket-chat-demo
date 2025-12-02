@@ -1,166 +1,508 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chat</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script type="text/javascript">
-window.onload = function () {
-    var conn;
-    var msg = document.getElementById("msg");
-    var log = document.getElementById("log");
-    var statusIndicator = document.getElementById("status");
-    var statusText = document.getElementById("statusText");
-    var guestName = "Guest";
-    var guestNameDisplay = document.getElementById("guestName");
-
-    function updateStatus(connected) {
-        if (connected) {
-            statusIndicator.className = "w-2 h-2 bg-green-500 rounded-full";
-            statusText.textContent = "Connected";
-        } else {
-            statusIndicator.className = "w-2 h-2 bg-red-500 rounded-full";
-            statusText.textContent = "Disconnected";
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebSocket Chat - Authentication Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+      [v-cloak] {
+        display: none;
+      }
+      
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
         }
-    }
-
-    function appendLog(item) {
-        var doScroll = log.scrollTop > log.scrollHeight - log.clientHeight - 1;
-        log.appendChild(item);
-        if (doScroll) {
-            log.scrollTop = log.scrollHeight - log.clientHeight;
+        to {
+          opacity: 1;
+          transform: translateY(0);
         }
-    }
+      }
+      .fade-in {
+        animation: fadeIn 0.3s ease-out;
+      }
+      
+      .app-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+      }
+    </style>
+    <script type="text/javascript">
+      const { createApp } = Vue;
 
-    document.getElementById("form").onsubmit = function () {
-        if (!conn) {
-            return false;
-        }
-        if (!msg.value) {
-            return false;
-        }
+      const app = createApp({
+        data() {
+          return {
+            // WebSocket
+            conn: null,
+            
+            // User data
+            guestName: 'Guest',
+            authToken: null,
+            
+            // UI state
+            showLoginScreen: true,
+            showAuthFlow: false,
+            isConnected: false,
+            isAuthenticating: false,
+            
+            // Steps status
+            steps: {
+              token: { status: 'idle', data: null },
+              websocket: { status: 'idle', url: null },
+              ready: { status: 'idle' }
+            },
+            
+            // Chat
+            messages: [],
+            currentMessage: '',
+            
+            // Copy feedback
+            copiedButtons: {}
+          };
+        },
         
-        var item = document.createElement("div");
-        item.className = "flex justify-end mb-2";
-        item.innerHTML = '<div class="bg-blue-500 text-white rounded-lg px-3 py-1.5 max-w-xs lg:max-w-md break-words text-sm">' + 
-                        '<div class="font-semibold text-xs mb-0.5">You</div>' +
-                        escapeHtml(msg.value) + '</div>';
-        appendLog(item);
+        computed: {
+          fullApiUrl() {
+            return `${window.location.protocol}//${window.location.host}/api/auth/token`;
+          },
+          
+          wsUrl() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            return `${protocol}//${window.location.host}/ws?token=${this.authToken}`;
+          },
+          
+          statusClass() {
+            return this.isConnected 
+              ? 'w-1.5 h-1.5 bg-emerald-500 rounded-full'
+              : 'w-1.5 h-1.5 bg-slate-400 rounded-full';
+          },
+          
+          statusTextClass() {
+            return this.isConnected 
+              ? 'text-xs text-emerald-600'
+              : 'text-xs text-slate-600';
+          },
+          
+          statusText() {
+            return this.isConnected ? 'Connected' : 'Disconnected';
+          }
+        },
         
-        conn.send(msg.value);
-        msg.value = "";
-        return false;
-    };
-
-    function escapeHtml(text) {
-        var map = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#039;'
-        };
-        return text.replace(/[&<>"']/g, function(m) { return map[m]; });
-    }
-
-    if (window["WebSocket"]) {
-        conn = new WebSocket("wss://" + document.location.host + "/ws");
-        
-        conn.onopen = function (evt) {
-            updateStatus(true);
-            var item = document.createElement("div");
-            item.className = "text-center text-xs text-gray-500 my-1";
-            item.innerHTML = "<span class='bg-gray-100 px-2 py-0.5 rounded-full'>Connection established</span>";
-            appendLog(item);
-        };
-        
-        conn.onclose = function (evt) {
-            updateStatus(false);
-            var item = document.createElement("div");
-            item.className = "text-center text-xs text-gray-500 my-1";
-            item.innerHTML = "<span class='bg-red-100 text-red-700 px-2 py-0.5 rounded-full'>Connection closed</span>";
-            appendLog(item);
-        };
-        
-        conn.onmessage = function (evt) {
-            var messages = evt.data.split('\n');
-            for (var i = 0; i < messages.length; i++) {
-                if (messages[i]) {
-                    // Check if this is an identity message
-                    if (messages[i].startsWith('IDENTITY:')) {
-                        guestName = messages[i].substring(9);
-                        guestNameDisplay.textContent = guestName;
-                        continue;
-                    }
-                    
-                    // Parse message to extract sender name
-                    var colonIndex = messages[i].indexOf(':');
-                    var senderName = '';
-                    var messageText = messages[i];
-                    
-                    if (colonIndex > 0) {
-                        senderName = messages[i].substring(0, colonIndex);
-                        messageText = messages[i].substring(colonIndex + 1).trim();
-                    }
-                    
-                    var item = document.createElement("div");
-                    item.className = "flex justify-start mb-2";
-                    item.innerHTML = '<div class="bg-gray-200 text-gray-800 rounded-lg px-3 py-1.5 max-w-xs lg:max-w-md break-words text-sm">' + 
-                                    '<div class="font-semibold text-xs mb-0.5 text-gray-600">' + escapeHtml(senderName) + '</div>' +
-                                    escapeHtml(messageText) + '</div>';
-                    appendLog(item);
-                }
+        methods: {
+          async startAuthentication() {
+            this.isAuthenticating = true;
+            this.showAuthFlow = true;
+            this.steps.token.status = 'loading';
+            
+            try {
+              await new Promise(resolve => setTimeout(resolve, 500));
+              
+              const response = await fetch('/api/auth/token');
+              const data = await response.json();
+              
+              if (data.error) {
+                throw new Error(data.error);
+              }
+              
+              this.authToken = data.token;
+              this.guestName = data.guest_name;
+              this.steps.token.status = 'success';
+              this.steps.token.data = {
+                guestName: data.guest_name,
+                token: data.token,
+                expiresAt: new Date(data.expires_at * 1000).toLocaleString(),
+                shortToken: data.token.substring(0, 20) + '...' + data.token.substring(data.token.length - 20)
+              };
+            } catch (error) {
+              alert('Failed to authenticate: ' + error.message);
+              this.isAuthenticating = false;
+              this.steps.token.status = 'error';
             }
-        };
-    } else {
-        var item = document.createElement("div");
-        item.className = "text-center text-red-600 font-semibold my-4";
-        item.innerHTML = "Your browser does not support WebSockets.";
-        appendLog(item);
-    }
-};
-</script>
-</head>
-<body class="bg-gradient-to-br from-blue-50 to-indigo-100 h-screen flex items-center justify-center p-2">
-    <div class="w-full max-w-3xl h-full max-h-[600px] bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden">
-        <!-- Header -->
-        <div class="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-2 flex items-center justify-between">
+          },
+          
+          connectWebSocket() {
+            if (!window.WebSocket) {
+              alert('Your browser does not support WebSockets.');
+              return;
+            }
+            
+            this.steps.websocket.status = 'loading';
+            this.steps.websocket.url = this.wsUrl;
+            
+            this.conn = new WebSocket(this.wsUrl);
+            
+            this.conn.onopen = () => {
+              this.steps.websocket.status = 'success';
+              this.isConnected = true;
+            };
+            
+            this.conn.onclose = () => {
+              this.isConnected = false;
+              if (!this.showLoginScreen) {
+                this.messages.push({
+                  type: 'system',
+                  text: 'Connection closed'
+                });
+              }
+            };
+            
+            this.conn.onmessage = (evt) => {
+              const messageLines = evt.data.split('\n');
+              messageLines.forEach(msg => {
+                if (!msg) return;
+                
+                if (msg.startsWith('IDENTITY:')) {
+                  this.guestName = msg.substring(9);
+                  this.steps.ready.status = 'success';
+                  return;
+                }
+                
+                const colonIndex = msg.indexOf(':');
+                if (colonIndex > 0) {
+                  const sender = msg.substring(0, colonIndex);
+                  const text = msg.substring(colonIndex + 1).trim();
+                  this.messages.push({
+                    type: 'received',
+                    sender: sender,
+                    text: text
+                  });
+                }
+              });
+            };
+          },
+          
+          proceedToChat() {
+            this.steps.ready.status = 'loading';
+            setTimeout(() => {
+              this.showLoginScreen = false;
+              this.$nextTick(() => {
+                this.$refs.messageInput?.focus();
+              });
+            }, 500);
+          },
+          
+          sendMessage() {
+            if (!this.conn || !this.currentMessage.trim()) {
+              return;
+            }
+            
+            this.messages.push({
+              type: 'sent',
+              text: this.currentMessage
+            });
+            
+            this.conn.send(this.currentMessage);
+            this.currentMessage = '';
+            
+            this.$nextTick(() => {
+              this.scrollToBottom();
+            });
+          },
+          
+          scrollToBottom() {
+            const logElement = this.$refs.messageLog;
+            if (logElement) {
+              logElement.scrollTop = logElement.scrollHeight;
+            }
+          },
+          
+          async copyToClipboard(text, buttonRef) {
+            try {
+              await navigator.clipboard.writeText(text);
+              // Set copied state for this button
+              this.copiedButtons[buttonRef] = true;
+              // Reset after 2 seconds
+              setTimeout(() => {
+                this.copiedButtons[buttonRef] = false;
+              }, 2000);
+            } catch (err) {
+              alert('Failed to copy: ' + err);
+            }
+          },
+          
+          getStepClasses(step) {
+            const baseClass = 'border rounded-md p-3 fade-in';
+            const status = this.steps[step].status;
+            
+            if (status === 'loading') return `${baseClass} border-blue-300`;
+            if (status === 'success') return `${baseClass} border-emerald-300`;
+            if (status === 'error') return `${baseClass} border-red-300`;
+            return `${baseClass} border-slate-200 opacity-50`;
+          },
+          
+          getStepIconClasses(step) {
+            const baseClass = 'flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center mt-0.5';
+            const status = this.steps[step].status;
+            
+            if (status === 'loading') return `${baseClass} bg-blue-500`;
+            if (status === 'success') return `${baseClass} bg-emerald-500`;
+            if (status === 'error') return `${baseClass} bg-red-500`;
+            return `${baseClass} bg-slate-200`;
+          }
+        },
+        
+        mounted() {
+          // Auto-scroll on new messages
+          this.$watch('messages', () => {
+            this.$nextTick(() => {
+              this.scrollToBottom();
+            });
+          }, { deep: true });
+        }
+      });
+
+      // Wait for DOM to be ready before mounting
+      document.addEventListener('DOMContentLoaded', () => {
+        app.mount('#app');
+        // Hide loading spinner
+        const loader = document.getElementById('app-loading');
+        if (loader) loader.style.display = 'none';
+      });
+    </script>
+  </head>
+  <body class="bg-slate-50 min-h-screen flex items-center justify-center p-4">
+    <div id="app-loading" class="app-loading">
+      <div class="text-center">
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-900 mx-auto mb-2"></div>
+        <div class="text-sm text-slate-600">Loading...</div>
+      </div>
+    </div>
+    <div id="app" class="w-full max-w-2xl" v-cloak>
+      <!-- Login Screen -->
+      <div v-if="showLoginScreen" class="max-w-xl mx-auto">
+        <div class="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+          <!-- Header -->
+          <div class="border-b border-slate-200 px-6 py-4">
+            <h1 class="text-xl font-semibold text-slate-900">WebSocket Chat Demo</h1>
+            <p class="text-sm text-slate-600 mt-1">JWT-based WebSocket connection demo</p>
+          </div>
+
+          <!-- Content -->
+          <div class="p-6">
+            <div class="mb-6">
+              <button
+                @click="startAuthentication"
+                :disabled="isAuthenticating"
+                class="w-full bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:opacity-50"
+              >
+                <span v-if="!isAuthenticating">Login as Guest</span>
+                <span v-else class="animate-pulse">Processing...</span>
+              </button>
+            </div>
+
+            <!-- Authentication Flow Steps -->
+            <div v-if="showAuthFlow" class="space-y-3">
+              <div class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-3">Process</div>
+
+              <!-- Step 1: Request Token -->
+              <div :class="getStepClasses('token')">
+                <div class="flex items-start gap-3">
+                  <div :class="getStepIconClasses('token')">
+                    <div v-if="steps.token.status === 'loading'" class="animate-spin rounded-full h-2.5 w-2.5 border-2 border-white border-t-transparent"></div>
+                    <svg v-else-if="steps.token.status === 'success'" class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm font-medium text-slate-900">Request JWT Token</div>
+                    <div class="text-xs text-slate-500 mt-0.5">
+                      Server generates a JWT token with guest identity via GET /api/auth/token
+                    </div>
+                    
+                    <div v-if="steps.token.data" class="mt-2">
+                      <div class="mb-2">
+                        <div class="text-xs text-slate-600 mb-1">API Endpoint:</div>
+                        <div class="flex items-center gap-2 group">
+                          <div class="flex-1 font-mono text-xs bg-slate-100 border border-slate-200 px-2 py-1 rounded break-all text-slate-700">
+                            {{ fullApiUrl }}
+                          </div>
+                          <button
+                            ref="copyApiBtn"
+                            @click="copyToClipboard(fullApiUrl, 'copyApiBtn')"
+                            :class="copiedButtons.copyApiBtn ? 'p-1 bg-emerald-100 rounded transition-colors flex-shrink-0' : 'p-1 hover:bg-slate-200 rounded transition-colors flex-shrink-0'"
+                            :title="copiedButtons.copyApiBtn ? 'Copied!' : 'Copy URL'"
+                          >
+                            <svg v-if="!copiedButtons.copyApiBtn" class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                            </svg>
+                            <svg v-else class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                      <div class="font-mono text-xs bg-slate-50 border border-slate-200 p-2 rounded-md space-y-1">
+                        <div><span class="text-slate-600">Guest:</span> <span class="text-slate-900 font-medium">{{ steps.token.data.guestName }}</span></div>
+                        <div class="text-slate-600 break-all">Token: {{ steps.token.data.shortToken }}</div>
+                        <div><span class="text-slate-600">Expires:</span> <span class="text-slate-900">{{ steps.token.data.expiresAt }}</span></div>
+                      </div>
+                      <button
+                        @click="connectWebSocket"
+                        class="mt-2 w-full bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+                      >
+                        Continue
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Step 2: Connect WebSocket -->
+              <div :class="getStepClasses('websocket')">
+                <div class="flex items-start gap-3">
+                  <div :class="getStepIconClasses('websocket')">
+                    <div v-if="steps.websocket.status === 'loading'" class="animate-spin rounded-full h-2.5 w-2.5 border-2 border-white border-t-transparent"></div>
+                    <svg v-else-if="steps.websocket.status === 'success'" class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm font-medium text-slate-900">Connect WebSocket</div>
+                    <div class="text-xs text-slate-500 mt-0.5">
+                      Establish WebSocket connection with JWT token passed as query parameter for authentication
+                    </div>
+                    
+                    <div v-if="steps.websocket.url" class="mt-2">
+                      <div class="text-xs text-slate-600 mb-1">WebSocket URL:</div>
+                      <div class="flex items-center gap-2 group">
+                        <div class="flex-1 font-mono text-xs bg-slate-100 border border-slate-200 px-2 py-1 rounded break-all text-slate-700">
+                          {{ steps.websocket.url }}
+                        </div>
+                        <button
+                          ref="copyWsBtn"
+                          @click="copyToClipboard(steps.websocket.url, 'copyWsBtn')"
+                          :class="copiedButtons.copyWsBtn ? 'p-1 bg-emerald-100 rounded transition-colors flex-shrink-0' : 'p-1 hover:bg-slate-200 rounded transition-colors flex-shrink-0'"
+                          :title="copiedButtons.copyWsBtn ? 'Copied!' : 'Copy URL'"
+                        >
+                          <svg v-if="!copiedButtons.copyWsBtn" class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                          </svg>
+                          <svg v-else class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                          </svg>
+                        </button>
+                      </div>
+                      <button
+                        v-if="steps.websocket.status === 'success'"
+                        @click="proceedToChat"
+                        class="mt-2 w-full bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+                      >
+                        Enter Chat
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Step 3: Ready -->
+              <div :class="getStepClasses('ready')">
+                <div class="flex items-start gap-3">
+                  <div :class="getStepIconClasses('ready')">
+                    <div v-if="steps.ready.status === 'loading'" class="animate-spin rounded-full h-2.5 w-2.5 border-2 border-white border-t-transparent"></div>
+                    <svg v-else-if="steps.ready.status === 'success'" class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm font-medium text-slate-900">Authenticated & Ready</div>
+                    <div class="text-xs text-slate-500 mt-0.5">
+                      Server validates token, confirms identity, and establishes secure bidirectional connection
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Info Box -->
+            <div class="mt-6 bg-blue-50 border border-blue-200 rounded-md p-3">
+              <div class="flex gap-2">
+                <svg class="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <div class="text-xs text-blue-900 leading-relaxed">
+                  <strong>How it works:</strong> The server generates a JWT token containing your guest identity and expiration. 
+                  This token is passed via query parameter during WebSocket upgrade, where the server validates it before 
+                  establishing a persistent connection for real-time bidirectional communication.
+                  <a href="https://websockets.readthedocs.io/en/latest/topics/authentication.html" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-blue-700 hover:text-blue-800 font-medium underline">
+                    Learn more
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                    </svg>
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Screen -->
+      <div v-else class="h-[500px]">
+        <div class="bg-white border border-slate-200 rounded-lg shadow-sm flex flex-col h-full">
+          <!-- Header -->
+          <div class="border-b border-slate-200 px-4 py-3 flex items-center justify-between">
             <div>
-                <h1 class="text-lg font-bold">WebSocket Chat</h1>
-                <p class="text-blue-100 text-xs flex items-center gap-2">
-                    <span id="guestName">Guest</span>
-                </p>
+              <h2 class="text-sm font-semibold text-slate-900">Real-time Chat</h2>
+              <p class="text-xs text-slate-600">
+                Logged in as <span class="font-medium">{{ guestName }}</span>
+              </p>
             </div>
             <div class="flex items-center gap-2">
-                <div id="status" class="w-2 h-2 bg-red-500 rounded-full"></div>
-                <span id="statusText" class="text-xs">Disconnected</span>
+              <div :class="statusClass"></div>
+              <span :class="statusTextClass">{{ statusText }}</span>
             </div>
-        </div>
+          </div>
 
-        <!-- Messages Container -->
-        <div id="log" class="flex-1 overflow-y-auto p-3 space-y-1">
-            <!-- Messages will appear here -->
-        </div>
+          <!-- Messages Container -->
+          <div ref="messageLog" class="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50">
+            <div
+              v-for="(message, index) in messages"
+              :key="index"
+              :class="message.type === 'sent' ? 'flex justify-end' : message.type === 'system' ? 'text-center my-2' : 'flex justify-start'"
+            >
+              <!-- Sent message -->
+              <div v-if="message.type === 'sent'" class="bg-slate-900 text-white rounded-lg px-3 py-2 max-w-xs shadow-sm">
+                <div class="text-xs font-medium mb-0.5">You</div>
+                <div class="text-sm">{{ message.text }}</div>
+              </div>
+              
+              <!-- Received message -->
+              <div v-else-if="message.type === 'received'" class="bg-white border border-slate-200 rounded-lg px-3 py-2 max-w-xs shadow-sm">
+                <div class="text-xs font-medium text-slate-900 mb-0.5">{{ message.sender }}</div>
+                <div class="text-sm text-slate-700">{{ message.text }}</div>
+              </div>
+              
+              <!-- System message -->
+              <span v-else class="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">{{ message.text }}</span>
+            </div>
+          </div>
 
-        <!-- Input Form -->
-        <form id="form" class="border-t border-gray-200 p-3 bg-gray-50">
+          <!-- Input Form -->
+          <form @submit.prevent="sendMessage" class="border-t border-slate-200 p-3 bg-white">
             <div class="flex gap-2">
-                <input 
-                    type="text" 
-                    id="msg" 
-                    placeholder="Type your message..." 
-                    autofocus
-                    class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-                <button 
-                    type="submit"
-                    class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                >
-                    Send
-                </button>
+              <input
+                ref="messageInput"
+                v-model="currentMessage"
+                type="text"
+                placeholder="Type a message..."
+                class="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+              />
+              <button
+                type="submit"
+                class="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
+              >
+                Send
+              </button>
             </div>
-        </form>
+          </form>
+        </div>
+      </div>
     </div>
-</body>
+  </body>
 </html>

@@ -1,101 +1,154 @@
-# WebSocket Chat Example
+# WebSocket Chat Demo
 
-This application shows how to use the
-[websocket](https://github.com/gorilla/websocket) package to implement a simple
-web chat application.
+This application demonstrates how to implement secure WebSocket authentication using JWT tokens with the [Gorilla WebSocket](https://github.com/gorilla/websocket) package. The demo includes an interactive UI that visualizes the authentication flow step-by-step.
 
-## Running the example
+Based on the [Gorilla WebSocket Chat Example](https://github.com/gorilla/websocket/tree/main/examples/chat) with added JWT authentication layer.
+
+## Authentication Implementation
+
+### Current Implementation: JWT via Query Parameter
+
+This demo uses **JWT token authentication via query string parameter** during the WebSocket upgrade request.
+
+**How it works:**
+1. Client requests a JWT token from `GET /api/auth/token`
+2. Server generates a JWT containing guest identity and expiration (24 hours)
+3. Client connects to WebSocket with token: `ws://localhost:8080/ws?token=<jwt_token>`
+4. Server validates token during connection upgrade before establishing WebSocket
+5. If valid, server accepts connection and assigns guest identity
+
+**Advantages:**
+- ✅ Simple to implement
+- ✅ Works in all browsers (no custom headers needed)
+- ✅ Token validated before WebSocket upgrade
+- ✅ Standard HTTP authentication flow
+
+**Disadvantages:**
+- ⚠️ Token visible in URL (though only during upgrade, not in browser address bar)
+- ⚠️ May appear in server logs if not configured carefully
+
+### Alternative Authentication Methods
+
+Based on [WebSocket Authentication Best Practices](https://websockets.readthedocs.io/en/latest/topics/authentication.html):
+
+#### 1. **Cookie-Based Authentication**
+```go
+// Server side
+http.SetCookie(w, &http.Cookie{
+    Name:     "auth_token",
+    Value:    token,
+    HttpOnly: true,
+    Secure:   true,
+    SameSite: http.SameSiteStrictMode,
+})
+
+// In WebSocket upgrade
+func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
+    cookie, err := r.Cookie("auth_token")
+    if err != nil {
+        http.Error(w, "Unauthorized", http.StatusUnauthorized)
+        return
+    }
+    // Validate cookie.Value...
+}
+```
+**Pros:** Most secure, automatic browser handling, HttpOnly prevents XSS  
+**Cons:** Requires cookie setup, CSRF considerations
+
+#### 2. **First Message Authentication**
+```go
+// Client sends token as first message after connection
+conn.send("AUTH:" + token);
+
+// Server waits for auth message before processing
+func (c *Client) readPump() {
+    authenticated := false
+    for {
+        _, message, err := c.conn.ReadMessage()
+        if !authenticated {
+            if bytes.HasPrefix(message, []byte("AUTH:")) {
+                token := string(bytes.TrimPrefix(message, []byte("AUTH:")))
+                // Validate token...
+                authenticated = true
+                continue
+            }
+            return // Disconnect if no auth
+        }
+        // Process normal messages...
+    }
+}
+```
+**Pros:** Token not in URL or headers  
+**Cons:** More complex, connection established before auth, needs timeout handling
+
+#### 3. **Subprotocol-Based Authentication**
+```javascript
+// Client
+const ws = new WebSocket('ws://localhost:8080/ws', ['auth.token.' + token]);
+
+// Server
+func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
+    subprotocols := r.Header.Get("Sec-WebSocket-Protocol")
+    // Parse and validate token from subprotocol
+}
+```
+**Pros:** Clean separation, part of WebSocket spec  
+**Cons:** Limited browser support, complex parsing
+
+## Running the Example
 
 The example requires a working Go development environment. The [Getting
 Started](http://golang.org/doc/install) page describes how to install the
 development environment.
 
-Once you have Go up and running, you can download, build and run the example
-using the following commands.
+Once you have Go up and running, you can download dependencies and run:
 
-    $ go get github.com/gorilla/websocket
+    $ go mod tidy
     $ go run *.go
 
-To use the chat example, open http://localhost:8080/ in your browser.
+To use the chat, open http://localhost:8080/ in your browser.
 
-## Server
+## API Endpoints
 
-The server application defines two types, `Client` and `Hub`. The server
-creates an instance of the `Client` type for each websocket connection. A
-`Client` acts as an intermediary between the websocket connection and a single
-instance of the `Hub` type. The `Hub` maintains a set of registered clients and
-broadcasts messages to the clients.
+### GET/POST `/api/auth/token`
 
-The application runs one goroutine for the `Hub` and two goroutines for each
-`Client`. The goroutines communicate with each other using channels. The `Hub`
-has channels for registering clients, unregistering clients and broadcasting
-messages. A `Client` has a buffered channel of outbound messages. One of the
-client's goroutines reads messages from this channel and writes the messages to
-the websocket. The other client goroutine reads messages from the websocket and
-sends them to the hub.
+Generates a JWT token for guest authentication.
 
-### Hub 
+**Response:**
+```json
+{
+  "token": "eyJhbGci...",
+  "guest_name": "guest-d3e6",
+  "expires_at": 1764671496
+}
+```
 
-The code for the `Hub` type is in
-[hub.go](https://github.com/gorilla/websocket/blob/main/examples/chat/hub.go).
-The application's `main` function starts the hub's `run` method as a goroutine.
-Clients send requests to the hub using the `register`, `unregister` and
-`broadcast` channels.
+### WebSocket `/ws`
 
-The hub registers clients by adding the client pointer as a key in the
-`clients` map. The map value is always true.
+WebSocket endpoint for real-time chat. **Requires authentication via query parameter.**
 
-The unregister code is a little more complicated. In addition to deleting the
-client pointer from the `clients` map, the hub closes the clients's `send`
-channel to signal the client that no more messages will be sent to the client.
+**Connection URL:**
+```
+ws://localhost:8080/ws?token=<jwt_token>
+```
 
-The hub handles messages by looping over the registered clients and sending the
-message to the client's `send` channel. If the client's `send` buffer is full,
-then the hub assumes that the client is dead or stuck. In this case, the hub
-unregisters the client and closes the websocket.
+**Authentication Flow:**
+1. Token is extracted from query parameter
+2. Token is validated (signature, expiration)
+3. Guest identity is extracted from token claims
+4. WebSocket upgrade is completed
+5. Client receives `IDENTITY:<guest_name>` message
 
-### Client
+**Supported Authentication Methods in Code:**
+- ✅ Query parameter: `?token=<jwt_token>` (active)
+- ⚠️ Authorization header: `Authorization: Bearer <jwt_token>` (implemented but not used by browser WebSocket API)
 
-The code for the `Client` type is in [client.go](https://github.com/gorilla/websocket/blob/main/examples/chat/client.go).
+> **Note:** Browser WebSocket API doesn't support custom headers. The Authorization header method is implemented server-side but cannot be used from browsers. Use query parameter instead.
 
-The `serveWs` function is registered by the application's `main` function as
-an HTTP handler. The handler upgrades the HTTP connection to the WebSocket
-protocol, creates a client, registers the client with the hub and schedules the
-client to be unregistered using a defer statement.
+## References
 
-Next, the HTTP handler starts the client's `writePump` method as a goroutine.
-This method transfers messages from the client's send channel to the websocket
-connection. The writer method exits when the channel is closed by the hub or
-there's an error writing to the websocket connection.
-
-Finally, the HTTP handler calls the client's `readPump` method. This method
-transfers inbound messages from the websocket to the hub.
-
-WebSocket connections [support one concurrent reader and one concurrent
-writer](https://godoc.org/github.com/gorilla/websocket#hdr-Concurrency). The
-application ensures that these concurrency requirements are met by executing
-all reads from the `readPump` goroutine and all writes from the `writePump`
-goroutine.
-
-To improve efficiency under high load, the `writePump` function coalesces
-pending chat messages in the `send` channel to a single WebSocket message. This
-reduces the number of system calls and the amount of data sent over the
-network.
-
-## Frontend
-
-The frontend code is in [home.html](https://github.com/gorilla/websocket/blob/main/examples/chat/home.html).
-
-On document load, the script checks for websocket functionality in the browser.
-If websocket functionality is available, then the script opens a connection to
-the server and registers a callback to handle messages from the server. The
-callback appends the message to the chat log using the appendLog function.
-
-To allow the user to manually scroll through the chat log without interruption
-from new messages, the `appendLog` function checks the scroll position before
-adding new content. If the chat log is scrolled to the bottom, then the
-function scrolls new content into view after adding the content. Otherwise, the
-scroll position is not changed.
-
-The form handler writes the user input to the websocket and clears the input
-field.
+- [Gorilla WebSocket Package](https://github.com/gorilla/websocket)
+- [Gorilla WebSocket Chat Example](https://github.com/gorilla/websocket/tree/main/examples/chat)
+- [WebSocket Authentication Best Practices](https://websockets.readthedocs.io/en/latest/topics/authentication.html)
+- [JWT (JSON Web Tokens)](https://jwt.io/)
+- [golang-jwt/jwt](https://github.com/golang-jwt/jwt)

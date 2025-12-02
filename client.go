@@ -128,13 +128,19 @@ func (c *Client) writePump() {
 
 // serveWs handles websocket requests from the peer.
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
+	// Authenticate the request
+	guestName, err := authenticateWebSocket(r)
+	if err != nil {
+		log.Printf("Authentication failed: %v", err)
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	// Generate a unique guest name
-	guestName := fmt.Sprintf("Guest-%s", randomHexStrings())
 
 	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256), name: guestName}
 	client.hub.register <- client
